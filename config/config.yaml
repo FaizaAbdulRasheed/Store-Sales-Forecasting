@@ -1,0 +1,122 @@
+project:
+  name: "Walmart M5 Store Sales Forecasting"
+  version: "1.0.0"
+  author: "ML Engineering Team"
+
+data:
+  n_stores: 10
+  n_departments: 7
+  n_categories: 3
+  n_items: 3049
+  history_days: 1941
+  forecast_horizon: 28
+  train_split_ratio: 0.85
+
+  stores:
+    - CA_1
+    - CA_2
+    - CA_3
+    - CA_4
+    - TX_1
+    - TX_2
+    - TX_3
+    - WI_1
+    - WI_2
+    - WI_3
+
+  categories:
+    - HOBBIES
+    - HOUSEHOLD
+    - FOODS
+
+  departments:
+    - HOBBIES_1
+    - HOBBIES_2
+    - HOUSEHOLD_1
+    - HOUSEHOLD_2
+    - FOODS_1
+    - FOODS_2
+    - FOODS_3
+
+hierarchy:
+  levels:
+    - name: total
+      description: "All stores, all products"
+    - name: state
+      description: "State level aggregation"
+      key: state_id
+    - name: store
+      description: "Individual store"
+      key: store_id
+    - name: category
+      description: "Product category"
+      key: cat_id
+    - name: department
+      description: "Product department"
+      key: dept_id
+    - name: store_category
+      description: "Store x Category"
+      keys: [store_id, cat_id]
+    - name: store_department
+      description: "Store x Department"
+      keys: [store_id, dept_id]
+    - name: item
+      description: "Individual item"
+      key: item_id
+    - name: item_store
+      description: "Item x Store (bottom level)"
+      keys: [item_id, store_id]
+
+lightgbm:
+  params:
+    objective: tweedie
+    tweedie_variance_power: 1.1
+    metric: rmse
+    n_estimators: 1500
+    learning_rate: 0.03
+    num_leaves: 127
+    min_child_samples: 20
+    feature_fraction: 0.8
+    bagging_fraction: 0.85
+    bagging_freq: 1
+    lambda_l2: 0.1
+    verbosity: -1
+    n_jobs: -1
+  early_stopping_rounds: 100
+  cv_folds: 5
+
+prophet:
+  params:
+    yearly_seasonality: true
+    weekly_seasonality: true
+    daily_seasonality: false
+    changepoint_prior_scale: 0.05
+    seasonality_prior_scale: 10.0
+    seasonality_mode: multiplicative
+  forecast_horizon: 28
+
+features:
+  lag_days: [7, 14, 28, 35, 42]
+  rolling_windows: [7, 14, 28, 56]
+  price_lag_days: [1, 7, 28]
+  use_calendar: true
+  use_price: true
+  use_events: true
+
+evaluation:
+  primary_metric: WRMSSE
+  secondary_metrics:
+    - RMSSE
+    - MAE
+    - MAPE
+  weight_levels:
+    - item_store
+    - item
+    - department
+    - category
+    - store
+    - total
+
+reconciliation:
+  method: bottom_up  # options: bottom_up, top_down, mint, ols
+  mint_method: shrink
