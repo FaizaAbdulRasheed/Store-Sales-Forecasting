@@ -7,7 +7,10 @@ leveraging rich features. Supports recursive multi-step forecasting.
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
-import joblib
+try:
+    import joblib
+except ImportError:
+    joblib = None
 import logging
 import os
 from typing import Dict, List, Optional, Tuple

@@ -6,19 +6,22 @@ In production, replace with actual M5 Kaggle dataset.
 
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-import holidays
+from datetime import datetime
 import logging
+
+try:
+    import holidays
+    HOLIDAYS_AVAILABLE = True
+except ImportError:
+    HOLIDAYS_AVAILABLE = False
+    holidays = None
 
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
-# Constants mirroring the real M5 competition
+# Constants
 # ─────────────────────────────────────────────
 STORES = ["CA_1", "CA_2", "CA_3", "CA_4", "TX_1", "TX_2", "TX_3", "WI_1", "WI_2", "WI_3"]
-STATES = {"CA": ["CA_1", "CA_2", "CA_3", "CA_4"],
-          "TX": ["TX_1", "TX_2", "TX_3"],
-          "WI": ["WI_1", "WI_2", "WI_3"]}
 
 CATEGORIES = {
     "HOBBIES": {"HOBBIES_1": 416, "HOBBIES_2": 290},
@@ -29,13 +32,6 @@ CATEGORIES = {
 START_DATE = datetime(2011, 1, 29)
 END_DATE = datetime(2016, 6, 19)
 
-# M5 special events
-SNAP_EVENTS = {
-    "CA": [1, 2, 3, 4, 5, 6],        # SNAP days (simplified)
-    "TX": [1, 2, 3, 4, 5, 6, 7],
-    "WI": [1, 2, 3, 4, 5, 6, 7, 8],
-}
-
 CULTURAL_EVENTS = [
     ("SuperBowl", "Sporting", "2011-02-06"), ("SuperBowl", "Sporting", "2012-02-05"),
     ("SuperBowl", "Sporting", "2013-02-03"), ("SuperBowl", "Sporting", "2014-02-02"),
@@ -43,14 +39,9 @@ CULTURAL_EVENTS = [
     ("ValentinesDay", "Cultural", "2011-02-14"), ("ValentinesDay", "Cultural", "2012-02-14"),
     ("ValentinesDay", "Cultural", "2013-02-14"), ("ValentinesDay", "Cultural", "2014-02-14"),
     ("ValentinesDay", "Cultural", "2015-02-14"), ("ValentinesDay", "Cultural", "2016-02-14"),
-    ("LentStart", "Religious", "2011-03-09"), ("LentStart", "Religious", "2012-02-22"),
     ("Easter", "Religious", "2011-04-24"), ("Easter", "Religious", "2012-04-08"),
     ("Easter", "Religious", "2013-03-31"), ("Easter", "Religious", "2014-04-20"),
     ("Easter", "Religious", "2015-04-05"), ("Easter", "Religious", "2016-03-27"),
-    ("MotherDay", "Cultural", "2011-05-08"), ("MotherDay", "Cultural", "2012-05-13"),
-    ("MotherDay", "Cultural", "2013-05-12"), ("MotherDay", "Cultural", "2014-05-11"),
-    ("MotherDay", "Cultural", "2015-05-10"), ("MotherDay", "Cultural", "2016-05-08"),
-    ("Cinco_De_Mayo", "Cultural", "2011-05-05"), ("Cinco_De_Mayo", "Cultural", "2012-05-05"),
     ("Halloween", "Cultural", "2011-10-31"), ("Halloween", "Cultural", "2012-10-31"),
     ("Halloween", "Cultural", "2013-10-31"), ("Halloween", "Cultural", "2014-10-31"),
     ("Halloween", "Cultural", "2015-10-31"),
@@ -64,26 +55,15 @@ CULTURAL_EVENTS = [
 
 
 class M5DataGenerator:
-    """
-    Generates M5-like synthetic sales data.
-    Preserves statistical properties of real M5:
-      - intermittent demand (zero-inflation)
-      - weekly seasonality
-      - annual seasonality
-      - holiday spikes
-      - price elasticity
-      - store-level variation
-    """
-
     def __init__(self, n_items_per_dept: int = 5, seed: int = 42):
         self.seed = seed
         self.n_items_per_dept = n_items_per_dept
         np.random.seed(seed)
+
         self._build_item_catalog()
         self._build_date_range()
 
     def _build_item_catalog(self):
-        """Build item catalog with realistic dept/cat mappings."""
         items = []
         for cat, depts in CATEGORIES.items():
             for dept, full_count in depts.items():
@@ -95,88 +75,73 @@ class M5DataGenerator:
                         "cat_id": cat,
                     })
         self.items_df = pd.DataFrame(items)
-        logger.info(f"Generated catalog: {len(self.items_df)} items")
 
     def _build_date_range(self):
-        """Build full date range."""
-        dates = pd.date_range(start=START_DATE, end=END_DATE, freq="D")
-        self.dates = dates
-        self.n_days = len(dates)
+        self.dates = pd.date_range(start=START_DATE, end=END_DATE, freq="D")
+        self.n_days = len(self.dates)
 
     def _generate_base_demand(self, item_id: str, store_id: str) -> np.ndarray:
-        """Generate realistic base demand signal."""
         rng = np.random.RandomState(hash(f"{item_id}_{store_id}") % (2**31))
         cat = item_id.split("_")[0]
 
-        # Base level per category
         base_levels = {"HOBBIES": 1.5, "HOUSEHOLD": 4.0, "FOODS": 8.0}
         base = base_levels.get(cat, 3.0) * rng.uniform(0.5, 2.5)
 
         t = np.arange(self.n_days)
 
-        # Trend (slight upward)
         trend = base * (1 + 0.0001 * t)
 
-        # Weekly seasonality (weekend boost for some items)
         day_of_week = np.array([d.dayofweek for d in self.dates])
-        weekend_factor = 1 + 0.3 * (day_of_week >= 5).astype(float) * rng.uniform(0.5, 1.5)
+        weekend_factor = 1 + 0.3 * (day_of_week >= 5).astype(float)
 
-        # Annual seasonality
-        annual = 1 + 0.2 * np.sin(2 * np.pi * t / 365.25 + rng.uniform(0, 2 * np.pi))
+        annual = 1 + 0.2 * np.sin(2 * np.pi * t / 365.25)
 
         demand = trend * weekend_factor * annual
 
-        # Add noise (negative binomial-like)
         noise = rng.negative_binomial(n=5, p=0.5, size=self.n_days) / 5
-        demand = demand * noise
+        demand *= noise
 
-        # Zero inflation (intermittent demand)
-        zero_prob = rng.uniform(0.05, 0.40)
-        zero_mask = rng.uniform(0, 1, self.n_days) < zero_prob
+        zero_mask = rng.uniform(0, 1, self.n_days) < rng.uniform(0.05, 0.40)
         demand[zero_mask] = 0
 
         return np.maximum(demand, 0).astype(int)
 
     def _apply_holiday_effects(self, demand: np.ndarray, cat: str) -> np.ndarray:
-        """Apply holiday and event demand spikes."""
-        us_holidays = holidays.US(years=range(2011, 2017))
-        holiday_dates = set(us_holidays.keys())
+        if not HOLIDAYS_AVAILABLE:
+            return demand
 
         holiday_multipliers = {
-            "FOODS": {"Christmas": 2.5, "Thanksgiving": 3.0, "SuperBowl": 1.8,
-                      "Easter": 1.5, "Halloween": 1.4, "default": 1.3},
-            "HOBBIES": {"Christmas": 3.5, "Easter": 1.3, "Halloween": 2.0,
-                        "ValentinesDay": 1.6, "default": 1.2},
-            "HOUSEHOLD": {"Christmas": 2.0, "MotherDay": 1.8, "default": 1.2},
+            "FOODS": {"Christmas": 2.5, "default": 1.3},
+            "HOBBIES": {"Christmas": 3.5, "default": 1.2},
+            "HOUSEHOLD": {"Christmas": 2.0, "default": 1.2},
         }
+
         mults = holiday_multipliers.get(cat, {"default": 1.2})
 
-        for name, event_type, date_str in CULTURAL_EVENTS:
+        for name, _, date_str in CULTURAL_EVENTS:
             try:
                 event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
                 idx = (pd.Timestamp(event_date) - pd.Timestamp(START_DATE)).days
+
                 if 0 <= idx < self.n_days:
-                    mult = mults.get(name, mults.get("default", 1.2))
-                    # Apply spike across ±2 days
+                    mult = mults.get(name, mults["default"])
+
                     for offset in range(-2, 3):
                         i = idx + offset
-                        decay = 1 - 0.2 * abs(offset)
                         if 0 <= i < self.n_days:
-                            demand[i] = int(demand[i] * mult * decay)
+                            demand[i] = int(demand[i] * mult)
+
             except Exception:
                 continue
 
         return demand
 
     def generate_sales_data(self) -> pd.DataFrame:
-        """Generate full sales panel data (long format)."""
-        logger.info("Generating sales data...")
         records = []
         d_cols = [f"d_{i}" for i in range(1, self.n_days + 1)]
 
         for _, item in self.items_df.iterrows():
             for store_id in STORES:
-                state_id = store_id.split("_")[0]
                 demand = self._generate_base_demand(item["item_id"], store_id)
                 demand = self._apply_holiday_effects(demand, item["cat_id"])
 
@@ -186,71 +151,43 @@ class M5DataGenerator:
                     "dept_id": item["dept_id"],
                     "cat_id": item["cat_id"],
                     "store_id": store_id,
-                    "state_id": state_id,
                 }
+
                 for j, d_col in enumerate(d_cols):
                     row[d_col] = demand[j]
+
                 records.append(row)
 
-        df = pd.DataFrame(records)
-        logger.info(f"Sales data shape: {df.shape}, Items: {len(self.items_df) * len(STORES)}")
-        return df
+        return pd.DataFrame(records)
 
     def generate_calendar(self) -> pd.DataFrame:
-        """Generate M5 calendar with events and SNAP flags."""
-        us_holidays = holidays.US(years=range(2011, 2017))
-        event_dict = {}
-        for name, event_type, date_str in CULTURAL_EVENTS:
-            dt = datetime.strptime(date_str, "%Y-%m-%d").date()
-            event_dict[dt] = (name, event_type)
-
         rows = []
-        for i, date in enumerate(self.dates):
-            d = date.date()
-            in_holiday = d in us_holidays
-            event_name_1 = event_dict.get(d, (None, None))[0]
-            event_type_1 = event_dict.get(d, (None, None))[1]
-            if in_holiday and not event_name_1:
-                event_name_1 = us_holidays.get(d, "")
-                event_type_1 = "National"
 
+        for i, date in enumerate(self.dates):
             rows.append({
                 "date": date,
-                "wm_yr_wk": int(date.strftime("%G%V")),
                 "weekday": date.strftime("%A"),
-                "wday": date.dayofweek + 1,
                 "month": date.month,
                 "year": date.year,
                 "d": f"d_{i + 1}",
-                "event_name_1": event_name_1,
-                "event_type_1": event_type_1,
-                "event_name_2": None,
-                "event_type_2": None,
-                "snap_CA": int(date.day in [1, 2, 3, 4, 5, 6]),
-                "snap_TX": int(date.day in [1, 2, 3, 4, 5, 6, 7]),
-                "snap_WI": int(date.day in [1, 2, 3, 4, 5, 6, 7, 8]),
             })
 
         return pd.DataFrame(rows)
 
     def generate_sell_prices(self, sales_df: pd.DataFrame) -> pd.DataFrame:
-        """Generate sell prices with realistic price changes."""
         rng = np.random.RandomState(self.seed)
         records = []
 
         for item_id in sales_df["item_id"].unique():
             for store_id in STORES:
-                cat = item_id.split("_")[0]
-                base_prices = {"HOBBIES": 8.0, "HOUSEHOLD": 5.5, "FOODS": 2.5}
-                base_price = base_prices.get(cat, 4.0) * rng.uniform(0.5, 3.0)
+                price = rng.uniform(1, 10)
 
-                # Weekly price with occasional price changes
-                wks = pd.date_range(start=START_DATE, end=END_DATE, freq="W-SAT")
-                price = base_price
-                for wk in wks:
-                    # 5% chance of price change
+                weeks = pd.date_range(start=START_DATE, end=END_DATE, freq="W")
+
+                for wk in weeks:
                     if rng.random() < 0.05:
-                        price = max(0.50, price * rng.uniform(0.85, 1.15))
+                        price *= rng.uniform(0.85, 1.15)
+
                     records.append({
                         "store_id": store_id,
                         "item_id": item_id,
@@ -262,12 +199,10 @@ class M5DataGenerator:
 
 
 def load_or_generate_data(n_items_per_dept: int = 8, seed: int = 42):
-    """
-    Load pre-generated data if it exists, else generate fresh.
-    Returns: sales_df, calendar_df, prices_df
-    """
     gen = M5DataGenerator(n_items_per_dept=n_items_per_dept, seed=seed)
+
     sales_df = gen.generate_sales_data()
     calendar_df = gen.generate_calendar()
     prices_df = gen.generate_sell_prices(sales_df)
+
     return sales_df, calendar_df, prices_df
