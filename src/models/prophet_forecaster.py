@@ -10,9 +10,13 @@ import logging
 import os
 import joblib
 from typing import Dict, List, Optional, Tuple
-from prophet import Prophet
-from prophet.diagnostics import cross_validation, performance_metrics
-
+try:
+    from prophet import Prophet
+    from prophet.diagnostics import cross_validation, performance_metrics
+    PROPHET_AVAILABLE = True
+except ImportError:
+    PROPHET_AVAILABLE = False
+    Prophet = None
 logger = logging.getLogger(__name__)
 
 
@@ -70,23 +74,23 @@ class ProphetForecaster:
         return series
 
     def fit_single(
-        self,
-        series: pd.DataFrame,
-        series_id: str,
-        add_snap: bool = False,
-        snap_series: Optional[pd.Series] = None,
-    ) -> Prophet:
-        """Fit a single Prophet model."""
+    self,
+    series: pd.DataFrame,
+    series_id: str,
+    add_snap: bool = False,
+    snap_series: Optional[pd.Series] = None,
+):
+    
+        if not PROPHET_AVAILABLE:
+            return None
         try:
             m = Prophet(holidays=PROPHET_HOLIDAYS, **self.params)
         except Exception:
-            # Fallback for older Prophet versions
             m = Prophet(holidays=PROPHET_HOLIDAYS)
-
-        if add_snap and snap_series is not None:
-            series = series.copy()
-            series["snap"] = snap_series.values
-            m.add_regressor("snap", standardize=False)
+            if add_snap and snap_series is not None:
+                series = series.copy()
+                series["snap"] = snap_series.values
+                m.add_regressor("snap", standardize=False)
 
         m.fit(series)
         self.models[series_id] = m
