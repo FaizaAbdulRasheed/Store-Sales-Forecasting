@@ -45,7 +45,9 @@ def reduce_mem_usage(df: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
 
 def melt_sales(sales_df: pd.DataFrame) -> pd.DataFrame:
     """Wide → long (melts d_1 … d_N columns)."""
-    id_cols = ["id", "item_id", "dept_id", "cat_id", "store_id", "state_id"]
+    all_id_cols = ["id", "item_id", "dept_id", "cat_id", "store_id", "state_id"]
+    # Only keep id_cols that actually exist in the dataframe
+    id_cols = [c for c in all_id_cols if c in sales_df.columns]
     d_cols = [c for c in sales_df.columns if c.startswith("d_")]
     long = sales_df.melt(id_vars=id_cols, value_vars=d_cols, var_name="d", value_name="sales")
     long["sales"] = long["sales"].astype(np.float32)
@@ -67,7 +69,8 @@ def merge_calendar(long_df: pd.DataFrame, calendar_df: pd.DataFrame) -> pd.DataF
 
 def merge_prices(df: pd.DataFrame, prices_df: pd.DataFrame) -> pd.DataFrame:
     """Attach sell price features."""
-    df = df.merge(prices_df, on=["store_id", "item_id", "wm_yr_wk"], how="left")
+    merge_cols = [c for c in ["store_id", "item_id", "wm_yr_wk"] if c in df.columns and c in prices_df.columns]
+    df = df.merge(prices_df, on=merge_cols, how="left")
     # Fill missing prices (items not yet available) with item-store mean
     df["sell_price"] = df.groupby(["item_id", "store_id"])["sell_price"].transform(
         lambda x: x.fillna(x.median())
@@ -100,7 +103,8 @@ def encode_categoricals(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Dict]
 
 def build_hierarchy_map(sales_df: pd.DataFrame) -> pd.DataFrame:
     """Build a mapping table covering all M5 hierarchy levels."""
-    id_cols = ["id", "item_id", "dept_id", "cat_id", "store_id", "state_id"]
+    all_id_cols = ["id", "item_id", "dept_id", "cat_id", "store_id", "state_id"]
+    id_cols = [c for c in all_id_cols if c in sales_df.columns]
     return sales_df[id_cols].drop_duplicates().reset_index(drop=True)
 
 
