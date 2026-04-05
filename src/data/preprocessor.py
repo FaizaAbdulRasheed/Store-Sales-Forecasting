@@ -61,9 +61,12 @@ def merge_calendar(long_df: pd.DataFrame, calendar_df: pd.DataFrame) -> pd.DataF
         "event_name_1", "event_type_1", "event_name_2", "event_type_2",
         "snap_CA", "snap_TX", "snap_WI",
     ]
+    # Only select columns that actually exist
+    cal_cols = [c for c in cal_cols if c in calendar_df.columns]
     cal = calendar_df[cal_cols].copy()
     merged = long_df.merge(cal, on="d", how="left")
-    merged["date"] = pd.to_datetime(merged["date"])
+    if "date" in merged.columns:
+        merged["date"] = pd.to_datetime(merged["date"])
     return merged
 
 
@@ -82,9 +85,12 @@ def merge_prices(df: pd.DataFrame, prices_df: pd.DataFrame) -> pd.DataFrame:
 def add_snap_flag(df: pd.DataFrame) -> pd.DataFrame:
     """Add unified SNAP flag based on state_id."""
     df["snap"] = 0
-    df.loc[df["state_id"] == "CA", "snap"] = df.loc[df["state_id"] == "CA", "snap_CA"]
-    df.loc[df["state_id"] == "TX", "snap"] = df.loc[df["state_id"] == "TX", "snap_TX"]
-    df.loc[df["state_id"] == "WI", "snap"] = df.loc[df["state_id"] == "WI", "snap_WI"]
+    if "snap_CA" in df.columns:
+        df.loc[df["state_id"] == "CA", "snap"] = df.loc[df["state_id"] == "CA", "snap_CA"]
+    if "snap_TX" in df.columns:
+        df.loc[df["state_id"] == "TX", "snap"] = df.loc[df["state_id"] == "TX", "snap_TX"]
+    if "snap_WI" in df.columns:
+        df.loc[df["state_id"] == "WI", "snap"] = df.loc[df["state_id"] == "WI", "snap_WI"]
     return df
 
 
